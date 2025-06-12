@@ -4,11 +4,11 @@ import numpy as np
 from pathlib import Path
 from ase.io import read
 
-def generate_csv(ids,energies,method) :
+def generate_csv(ids, energies, method):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     output_path = os.path.join(base_dir, "results", f"{method}.csv")
-    df = pd.DataFrame({'id':ids,'energy':energies})
-    df.to_csv(output_path,header=True)
+    df = pd.DataFrame({'id': ids, 'energy': energies})
+    df.to_csv(output_path, header=True, index=False)
 
 
 
