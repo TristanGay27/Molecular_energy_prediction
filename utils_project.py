@@ -60,7 +60,7 @@ def create_dataframe_from_xyz_files(path, csv_path):
         molecule_id = xyz_file.stem
         numeric_id = int(molecule_id.split('_')[-1])
 
-        features = extract_features_from_xyz(xyz_file)
+        features = extract_features_from_xyz(xyz_file)   ##### On extrait des caractéristiques de la molécules
         features['id'] = numeric_id  # Ajout de l'identifiant
 
         if csv_path is not None:
