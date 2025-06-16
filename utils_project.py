@@ -54,14 +54,17 @@ def extract_positions_charges_energies_from_xyz(xyz_file,max_atoms):
 
     # Extract positions
     positions = atoms.get_positions().tolist()
+    padding = [[0.0, 0.0, 0.0] for _ in range(max_atoms - len(positions))]
+    positions.extend(padding)
 
     # Extract charges if they exist; otherwise, use a default value of 0.0
     charges = atoms.get_atomic_numbers().tolist()
     charges.extend([0 for _ in range(max_atoms - len(charges))])
 
+
     return {
-        'positions': positions,
-        'charges': charges,
+        'positions': np.array(positions),
+        'charges': np.array(charges),
     }
 
 def create_dataframe_from_xyz_files(path, csv_path=None):
