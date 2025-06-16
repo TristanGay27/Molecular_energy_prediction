@@ -48,7 +48,24 @@ def extract_features_from_xyz(file_path):
     return features
 
 
-def create_dataframe_from_xyz_files(path, csv_path):
+def extract_positions_charges_energies_from_xyz(xyz_file,max_atoms):
+    # Read the XYZ file using ASE
+    atoms = read(xyz_file)
+
+    # Extract positions
+    positions = atoms.get_positions().tolist()
+
+    # Extract charges if they exist; otherwise, use a default value of 0.0
+    charges = atoms.get_atomic_numbers().tolist()
+    charges.extend([0 for _ in range(max_atoms - len(charges))])
+
+    return {
+        'positions': positions,
+        'charges': charges,
+    }
+
+def create_dataframe_from_xyz_files(path, csv_path=None):
+    
     if csv_path is not None:
         energy_data = pd.read_csv(csv_path)
 
@@ -56,22 +73,35 @@ def create_dataframe_from_xyz_files(path, csv_path):
     xyz_files = list(data_dir.glob("*.xyz"))
     data = []
 
+    max_atoms = 0
+    for xyz_file in xyz_files:
+        atoms = read(xyz_file)
+        num_atoms = len(atoms)
+        if num_atoms > max_atoms:
+            max_atoms = num_atoms
+
     for xyz_file in xyz_files:
         molecule_id = xyz_file.stem
         numeric_id = int(molecule_id.split('_')[-1])
 
-        features = extract_features_from_xyz(xyz_file)   ##### On extrait des caractéristiques de la molécules
-        features['id'] = numeric_id  # Ajout de l'identifiant
+        features = extract_features_from_xyz(xyz_file)
+        features['id'] = numeric_id
+
+        # Extract positions, charges, and energy from the XYZ file
+        additional_features = extract_positions_charges_energies_from_xyz(xyz_file,max_atoms)
 
         if csv_path is not None:
             energy = energy_data.loc[energy_data['id'] == numeric_id, 'energy'].values
             if len(energy) > 0:
-                features['energy'] = energy[0]
+                additional_features['energy'] = energy[0]
 
-        data.append(features)
+        # Combine the features
+        combined_features = {**features, **additional_features}
+        data.append(combined_features)
 
     df = pd.DataFrame(data)
     return df
+
 
 
 
