@@ -73,7 +73,7 @@ def create_dataframe_from_xyz_files(path, csv_path=None):
         energy_data = pd.read_csv(csv_path)
 
     data_dir = Path(path)
-    xyz_files = list(data_dir.glob("*.xyz"))
+    xyz_files = sorted(list(data_dir.glob("*.xyz")))
     data = []
 
     max_atoms = 0
