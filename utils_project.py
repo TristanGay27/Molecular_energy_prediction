@@ -3,6 +3,8 @@ import os
 import numpy as np
 from pathlib import Path
 from ase.io import read
+from dscribe.descriptors import CoulombMatrix
+
 
 def generate_csv(ids, energies, method):
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -62,33 +64,50 @@ def extract_features_from_xyz_inv(file_path):
      # === Matrice de Coulomb ===
     Z = atoms.get_atomic_numbers()
     N = len(Z)
-    coulomb = np.zeros((N, N))
-    for i in range(N):
-        for j in range(N):
-            if i == j:
-                coulomb[i, j] = 0.5 * Z[i] ** 2.4
-            else:
-                dist = np.linalg.norm(positions[i] - positions[j])
-                coulomb[i, j] = Z[i] * Z[j] / dist if dist != 0 else 0
+    # === Matrice de Coulomb (flatten + stats invariantes) ===
+    cm = CoulombMatrix(n_atoms_max=23, permutation='sorted_l2')
+    coulomb_vector = cm.create(atoms)
 
-    # Coulomb features: stats
-    coulomb_no_diag = coulomb[~np.eye(N, dtype=bool)]
-    coulomb_stats = {
-        'coulomb_mean': np.mean(coulomb_no_diag),
-        'coulomb_std': np.std(coulomb_no_diag),
-        'coulomb_max': np.max(coulomb_no_diag),
-        'coulomb_min': np.min(coulomb_no_diag),
+    # Reshape pour obtenir la matrice complète
+    matrix_size = int(np.sqrt(len(coulomb_vector)))
+    coulomb_matrix = coulomb_vector.reshape((matrix_size, matrix_size))
+
+    # Flatten
+    flattened_coulomb = coulomb_vector.flatten()
+    coulomb_features = {f'coulomb_flat_{i}': val for i, val in enumerate(flattened_coulomb)}
+
+    # Statistiques globales (toute la matrice)
+    coulomb_stats_global = {
+        'coulomb_mean': np.mean(coulomb_matrix),
+        'coulomb_std': np.std(coulomb_matrix),
+        'coulomb_min': np.min(coulomb_matrix),
+        'coulomb_max': np.max(coulomb_matrix),
     }
 
-    # Coulomb spectrum (valeurs propres triées)
-    spectrum = np.linalg.eigvalsh(coulomb)
-    spectrum = np.sort(spectrum)[::-1]  # tri décroissant
-    top_10_spectrum = spectrum[:10]  # garder les 10 premiers
+    # Diagonale (auto-énergies)
+    diag = np.diag(coulomb_matrix)
+    coulomb_stats_diag = {
+        'coulomb_diag_mean': np.mean(diag),
+        'coulomb_diag_std': np.std(diag),
+        'coulomb_diag_min': np.min(diag),
+        'coulomb_diag_max': np.max(diag),
+    }
 
-    spectrum_features = {f'coul_spec_{i}': val for i, val in enumerate(top_10_spectrum)}
+    # Hors-diagonale (interactions entre atomes)
+    off_diag = coulomb_matrix[~np.eye(matrix_size, dtype=bool)]
+    coulomb_stats_off_diag = {
+        'coulomb_offdiag_mean': np.mean(off_diag),
+        'coulomb_offdiag_std': np.std(off_diag),
+        'coulomb_offdiag_min': np.min(off_diag),
+        'coulomb_offdiag_max': np.max(off_diag),
+    }
 
-    features.update(coulomb_stats)
-    features.update(spectrum_features)
+    # Fusionner tous les features
+    features.update(coulomb_features)
+    features.update(coulomb_stats_global)
+    features.update(coulomb_stats_diag)
+    features.update(coulomb_stats_off_diag)
+
 
     return features
 
