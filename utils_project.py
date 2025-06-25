@@ -3,7 +3,7 @@ import os
 import numpy as np
 from pathlib import Path
 from ase.io import read
-from dscribe.descriptors import CoulombMatrix
+#from dscribe.descriptors import CoulombMatrix
 
 
 def generate_csv(ids, energies, method):
@@ -11,6 +11,9 @@ def generate_csv(ids, energies, method):
     output_path = os.path.join(base_dir, "results", f"{method}.csv")
     df = pd.DataFrame({'id': ids, 'energy': energies})
     df.to_csv(output_path, header=True, index=False)
+
+from itertools import combinations
+from scipy.stats import skew
 
 def extract_features_from_xyz_inv(file_path):
     atoms = read(file_path)
@@ -32,6 +35,8 @@ def extract_features_from_xyz_inv(file_path):
     min_distance = np.min(interatomic_distances)
     max_distance = np.max(interatomic_distances)
     bond_length_std = np.std(interatomic_distances)
+    bond_length_moment_2 = np.mean(interatomic_distances**2)
+    bond_length_moment_3 = np.mean(interatomic_distances**3)
 
     # Radius of gyration
     center_of_mass = np.average(positions, axis=0, weights=masses)
@@ -48,6 +53,14 @@ def extract_features_from_xyz_inv(file_path):
     eigvals = np.linalg.eigvalsh(inertia_tensor)
     eigvals.sort()
 
+    # Project masses on principal axes
+    mass_proj_var = np.zeros(3)
+    if num_atoms >= 2:
+        eigvecs = np.linalg.eigh(inertia_tensor)[1]
+        projected = rel_positions @ eigvecs
+        for i in range(3):
+            mass_proj_var[i] = np.var(projected[:, i] * masses)
+
     features = {
         'num_atoms': num_atoms,
         'total_mass': total_mass,
@@ -55,61 +68,87 @@ def extract_features_from_xyz_inv(file_path):
         'min_distance': min_distance,
         'max_distance': max_distance,
         'bond_length_std': bond_length_std,
+        'bond_length_moment_2': bond_length_moment_2,
+        'bond_length_moment_3': bond_length_moment_3,
         'radius_of_gyration': radius_of_gyration,
         'inertia_eig_0': eigvals[0],
         'inertia_eig_1': eigvals[1],
         'inertia_eig_2': eigvals[2],
+        'mass_proj_var_0': mass_proj_var[0],
+        'mass_proj_var_1': mass_proj_var[1],
+        'mass_proj_var_2': mass_proj_var[2],
     }
 
-     # === Matrice de Coulomb ===
+    # === Matrice de Coulomb ===
     Z = atoms.get_atomic_numbers()
     N = len(Z)
-    # === Matrice de Coulomb (flatten + stats invariantes) ===
-    cm = CoulombMatrix(n_atoms_max=23, permutation='sorted_l2')
-    coulomb_vector = cm.create(atoms)
+    coulomb = np.zeros((N, N))
+    for i in range(N):
+        for j in range(N):
+            if i == j:
+                coulomb[i, j] = 0.5 * Z[i] ** 2.4
+            else:
+                dist = np.linalg.norm(positions[i] - positions[j])
+                coulomb[i, j] = Z[i] * Z[j] / dist if dist != 0 else 0
 
-    # Reshape pour obtenir la matrice complète
-    matrix_size = int(np.sqrt(len(coulomb_vector)))
-    coulomb_matrix = coulomb_vector.reshape((matrix_size, matrix_size))
-
-    # Flatten
-    flattened_coulomb = coulomb_vector.flatten()
-    coulomb_features = {f'coulomb_flat_{i}': val for i, val in enumerate(flattened_coulomb)}
-
-    # Statistiques globales (toute la matrice)
-    coulomb_stats_global = {
-        'coulomb_mean': np.mean(coulomb_matrix),
-        'coulomb_std': np.std(coulomb_matrix),
-        'coulomb_min': np.min(coulomb_matrix),
-        'coulomb_max': np.max(coulomb_matrix),
+    # Coulomb features: stats
+    coulomb_no_diag = coulomb[~np.eye(N, dtype=bool)]
+    coulomb_stats = {
+        'coulomb_mean': np.mean(coulomb_no_diag),
+        'coulomb_std': np.std(coulomb_no_diag),
+        'coulomb_max': np.max(coulomb_no_diag),
+        'coulomb_min': np.min(coulomb_no_diag),
     }
 
-    # Diagonale (auto-énergies)
-    diag = np.diag(coulomb_matrix)
-    coulomb_stats_diag = {
-        'coulomb_diag_mean': np.mean(diag),
-        'coulomb_diag_std': np.std(diag),
-        'coulomb_diag_min': np.min(diag),
-        'coulomb_diag_max': np.max(diag),
+    # Coulomb spectrum (valeurs propres triées)
+    spectrum = np.linalg.eigvalsh(coulomb)
+    spectrum = np.sort(spectrum)[::-1]  # tri décroissant
+    top_10_spectrum = spectrum[:10]  # garder les 10 premiers
+    spectrum_features = {f'coul_spec_{i}': val for i, val in enumerate(top_10_spectrum)}
+
+    features.update(coulomb_stats)
+    features.update(spectrum_features)
+
+    # === Angles triatomiques ===
+    angles = []
+    for i, j, k in combinations(range(N), 3):
+        vec_ij = positions[j] - positions[i]
+        vec_ik = positions[k] - positions[i]
+        norm_ij = np.linalg.norm(vec_ij)
+        norm_ik = np.linalg.norm(vec_ik)
+        if norm_ij > 1e-8 and norm_ik > 1e-8:
+            cos_theta = np.dot(vec_ij, vec_ik) / (norm_ij * norm_ik)
+            angle = np.arccos(np.clip(cos_theta, -1, 1))
+            angles.append(np.degrees(angle))
+
+    if len(angles) > 0:
+        angle_stats = {
+            'angle_mean': np.mean(angles),
+            'angle_std': np.std(angles),
+            'angle_min': np.min(angles),
+            'angle_max': np.max(angles),
+        }
+    else:
+        angle_stats = {
+            'angle_mean': 0.0,
+            'angle_std': 0.0,
+            'angle_min': 0.0,
+            'angle_max': 0.0,
+        }
+
+    features.update(angle_stats)
+
+    # === Skewness des coordonnées centrées ===
+    skewness = {
+        'skew_x': skew(rel_positions[:, 0]),
+        'skew_y': skew(rel_positions[:, 1]),
+        'skew_z': skew(rel_positions[:, 2]),
     }
 
-    # Hors-diagonale (interactions entre atomes)
-    off_diag = coulomb_matrix[~np.eye(matrix_size, dtype=bool)]
-    coulomb_stats_off_diag = {
-        'coulomb_offdiag_mean': np.mean(off_diag),
-        'coulomb_offdiag_std': np.std(off_diag),
-        'coulomb_offdiag_min': np.min(off_diag),
-        'coulomb_offdiag_max': np.max(off_diag),
-    }
-
-    # Fusionner tous les features
-    features.update(coulomb_features)
-    features.update(coulomb_stats_global)
-    features.update(coulomb_stats_diag)
-    features.update(coulomb_stats_off_diag)
-
+    features.update(skewness)
 
     return features
+
 
 
 def extract_features_from_xyz(file_path):
