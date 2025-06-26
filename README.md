@@ -18,8 +18,8 @@ Ce projet se concentre sur la prédiction de la surface d'énergie potentielle i
 | Dossier/Fichier | Description |
 |-----------------|-------------|
 | `data_exploration` | Exploration des données |
-| `models` | Modèles  |
-| `models_scattering` | Modèles de scattering |
-| `results` | Stockage des résultats |
+| `models` | Notebooks contenant tous les modèles testés  |
+| `models_scattering` | Poids et résultats du scattering |
+| `results` | Stockage des résultats au format csv|
 | `TP_Bayes_optimal_NN.ipynb` | Notebook pour le produit ElementWise |
 | `utils_project.py` | Script de gestion des données |
